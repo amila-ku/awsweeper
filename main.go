@@ -21,15 +21,20 @@ import (
 	"sync"
 	"github.com/aws/aws-sdk-go/service/efs"
 	"github.com/aws/aws-sdk-go/service/kms"
-	"io/ioutil"
 )
 
 func main() {
 	app := "awsweeper"
-	profile := os.Args[1]
+	profile := ""
+	if len(os.Args) > 1 {
+		profile = os.Args[1]
+	} else {
+		fmt.Println("Profile is missing")
+		os.Exit(1)
+	}
 
-	log.SetFlags(0)
-	log.SetOutput(ioutil.Discard)
+	//log.SetFlags(0)
+	//log.SetOutput(ioutil.Discard)
 
 	c := &cli.CLI{
 		Name: app,
@@ -46,23 +51,29 @@ func main() {
 
 	p := initAwsProvider(profile, region)
 
-	/*
-	f := flagSet("bla")
+	//f := flagSet("bla")
 
-
-	for i, cmd := range c.SubcommandArgs() {
-		if cmd == "--tag-value" {
-			if c.SubcommandArgs()[i+1] == nil {
-				os.Exit(1)
-			}
-			fmt.Println(c.SubcommandArgs()[i+1])
-		}
+	client := &AWSClient{
+		autoscalingconn: autoscaling.New(sess),
+		ec2conn: ec2.New(sess),
+		elbconn: elb.New(sess),
+		r53conn: route53.New(sess),
+		cfconn: cloudformation.New(sess),
+		efsconn:  efs.New(sess),
+		iamconn: iam.New(sess),
+		kmsconn: kms.New(sess),
 	}
-	*/
 
 	c.Commands = map[ string]cli.CommandFactory{
-		"wipe": func() (cli.Command, error) {
-			return &WipeCommand{
+		"yaml": func() (cli.Command, error) {
+			return &WipeByYamlConfig{
+				client: client,
+				provider: p,
+				yamlConfig: map[string]B{},
+			}, nil
+		},
+		"all": func() (cli.Command, error) {
+			return &WipeAllCommand{
 				autoscalingconn: autoscaling.New(sess),
 				ec2conn: ec2.New(sess),
 				elbconn: elb.New(sess),
@@ -72,7 +83,20 @@ func main() {
 				iamconn: iam.New(sess),
 				kmsconn: kms.New(sess),
 				provider: p,
-				bla: map[string]B{},
+			}, nil
+		},
+		"output": func() (cli.Command, error) {
+			return &WipeAllCommand{
+				autoscalingconn: autoscaling.New(sess),
+				ec2conn: ec2.New(sess),
+				elbconn: elb.New(sess),
+				r53conn: route53.New(sess),
+				cfconn: cloudformation.New(sess),
+				efsconn:  efs.New(sess),
+				iamconn: iam.New(sess),
+				kmsconn: kms.New(sess),
+				provider: p,
+				out: map[string]B{},
 			}, nil
 		},
 	}
@@ -87,6 +111,20 @@ func main() {
 
 func initAwsProvider(profile string, region string) *terraform.ResourceProvider {
 	p := aws.Provider()
+
+	// list all schemas of resource types
+	//for k, v := range aws.Provider().(*schema.Provider).ResourcesMap {
+	//	fmt.Println(k)
+	//	for k, v := range  v.Schema {
+	//		fmt.Println("\t", k)
+	//		fmt.Println("\t", v)
+	//	}
+	//}
+
+	// list all resource types
+	//for _, r := range p.Resources() {
+	//	fmt.Println(r)
+	//}
 
 	cfg := map[string]interface{}{
 		"region":     region,
@@ -195,13 +233,19 @@ type Resource struct {
 }
 
 func (c *WipeCommand) deleteResources(rSet ResourceSet) {
+	isDryRun := true
+	numWorkerThreads := 10
+
 	if len(rSet.Ids) == 0 {
 		return
 	}
 
-	c.bla[rSet.Type] = B{Ids: rSet.Ids}
+	c.out[rSet.Type] = B{Ids: rSet.Ids}
 
 	printType(rSet.Type, len(rSet.Ids))
+	if len(rSet.Info) > 0 {
+		fmt.Println(rSet.Info)
+	}
 
 	ii := &terraform.InstanceInfo{
 		Type: rSet.Type,
@@ -211,16 +255,19 @@ func (c *WipeCommand) deleteResources(rSet ResourceSet) {
 		Destroy: true,
 	}
 
-	a := make([]*map[string]string, len(rSet.Ids))
+	a := []*map[string]string{}
 	if len(rSet.Attrs) > 0 {
 		a = rSet.Attrs
+	} else {
+		for i := 0; i < len(rSet.Ids); i++ {
+			a = append(a, &map[string]string{})
+		}
 	}
+
 	ts := make([]*map[string]string, len(rSet.Ids))
 	if len(rSet.Tags) > 0 {
 		ts = rSet.Tags
 	}
-	isDryRun := true
-	numWorkerThreads := 10
 	chResources := make(chan *Resource, numWorkerThreads)
 
 	var wg sync.WaitGroup
@@ -233,33 +280,42 @@ func (c *WipeCommand) deleteResources(rSet ResourceSet) {
 				if more {
 					printStat := fmt.Sprintf("\tId:\t%s", *res.id)
 					if res.tags != nil {
-						printStat += "\n\tTags:\t"
-						for k, v := range *res.tags {
-							printStat += fmt.Sprintf("[%s: %v] ", k, v)
+						if len(*res.tags) > 0 {
+							printStat += "\n\tTags:\t"
+							for k, v := range *res.tags {
+								printStat += fmt.Sprintf("[%s: %v] ", k, v)
+							}
+							printStat += "\n"
 						}
-						printStat += "\n"
 					}
 					fmt.Println(printStat)
 
 					a := res.attrs
-					var s *terraform.InstanceState
-					if a == nil {
-						s = &terraform.InstanceState{
-							ID: *res.id,
-						}
-					} else {
-						s = &terraform.InstanceState{
-							ID: *res.id,
-							Attributes: *a,
-						}
+					(*a)["force_destroy"] = "true"
+
+					s := &terraform.InstanceState{
+						ID: *res.id,
+						Attributes: *a,
+					}
+
+					st, err := (*c.provider).Refresh(ii, s)
+					if err != nil{
+						fmt.Println("err: ", err)
+						st = s
+						st.Attributes["force_destroy"] = "true"
+					}
+					if rSet.Type == "aws_iam_role_policy_attachment" {
+						fmt.Println(st)
+					}
+					if rSet.Type == "aws_iam_role" {
+						fmt.Println(st)
 					}
 
 					if !isDryRun {
-						_, err := (*c.provider).Apply(ii, s, d)
+						_, err := (*c.provider).Apply(ii, st, d)
 
 						if err != nil {
-							fmt.Printf("err: %s\n", err)
-							//os.Exit(1)
+							fmt.Printf("\t%s\n", err)
 						}
 					}
 					wg.Done()
