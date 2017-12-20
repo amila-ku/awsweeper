@@ -1,26 +1,27 @@
 package main
 
 import (
-	"github.com/aws/aws-sdk-go/aws/session"
-	"fmt"
-	"os"
-	"log"
-	"github.com/mitchellh/cli"
-	"github.com/aws/aws-sdk-go/service/ec2"
-	"github.com/aws/aws-sdk-go/service/iam"
-	"github.com/aws/aws-sdk-go/service/autoscaling"
-	"github.com/aws/aws-sdk-go/service/elb"
-	"github.com/aws/aws-sdk-go/service/route53"
-	"github.com/aws/aws-sdk-go/service/cloudformation"
-	"github.com/hashicorp/terraform/terraform"
-	"github.com/hashicorp/terraform/builtin/providers/aws"
-	"github.com/hashicorp/terraform/config"
-	"github.com/aws/aws-sdk-go/service/efs"
-	"github.com/aws/aws-sdk-go/service/kms"
-	"io/ioutil"
 	"flag"
+	"fmt"
+	"io/ioutil"
+	"log"
+	"os"
+
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/autoscaling"
+	"github.com/aws/aws-sdk-go/service/cloudformation"
+	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/aws/aws-sdk-go/service/efs"
+	"github.com/aws/aws-sdk-go/service/elb"
+	"github.com/aws/aws-sdk-go/service/iam"
+	"github.com/aws/aws-sdk-go/service/kms"
+	"github.com/aws/aws-sdk-go/service/route53"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/sts"
+	"github.com/hashicorp/terraform/builtin/providers/aws"
+	"github.com/hashicorp/terraform/config"
+	"github.com/hashicorp/terraform/terraform"
+	"github.com/mitchellh/cli"
 )
 
 func main() {
@@ -53,15 +54,15 @@ func main() {
 	}
 
 	c := &cli.CLI{
-		Name: app,
-		Version: version,
+		Name:     app,
+		Version:  version,
 		HelpFunc: BasicHelpFunc(app),
 	}
 	c.Args = append([]string{"wipe"}, flag.Args()...)
 
 	sess := session.Must(session.NewSessionWithOptions(session.Options{
 		SharedConfigState: session.SharedConfigEnable,
-		Profile: *profile,
+		Profile:           *profile,
 	}))
 
 	if *region == "" {
@@ -78,15 +79,15 @@ func main() {
 
 	client := &AWSClient{
 		autoscalingconn: autoscaling.New(sess),
-		ec2conn: ec2.New(sess),
-		elbconn: elb.New(sess),
-		r53conn: route53.New(sess),
-		cfconn: cloudformation.New(sess),
-		efsconn:  efs.New(sess),
-		iamconn: iam.New(sess),
-		kmsconn: kms.New(sess),
-		s3conn: s3.New(sess),
-		stsconn: sts.New(sess),
+		ec2conn:         ec2.New(sess),
+		elbconn:         elb.New(sess),
+		r53conn:         route53.New(sess),
+		cfconn:          cloudformation.New(sess),
+		efsconn:         efs.New(sess),
+		iamconn:         iam.New(sess),
+		kmsconn:         kms.New(sess),
+		s3conn:          s3.New(sess),
+		stsconn:         sts.New(sess),
 	}
 
 	c.Commands = map[string]cli.CommandFactory{
@@ -96,9 +97,9 @@ func main() {
 					Ui:          ui,
 					OutputColor: cli.UiColorBlue,
 				},
-				client: client,
-				provider: p,
-				dryRun: *dryRunFlag,
+				client:      client,
+				provider:    p,
+				dryRun:      *dryRunFlag,
 				forceDelete: *forceDeleteFlag,
 				outFileName: *outFileName,
 			}, nil
@@ -141,8 +142,8 @@ func initAwsProvider(profile string, region string) *terraform.ResourceProvider 
 	p := aws.Provider()
 
 	cfg := map[string]interface{}{
-		"region":     region,
-		"profile":    profile,
+		"region":  region,
+		"profile": profile,
 	}
 
 	rc, err := config.NewRawConfig(cfg)
